@@ -1,33 +1,44 @@
 import socket
 import time
-import random
 
-ACTIVE = "ACTIVE"
-PASSIVE = "PASSIVE"
+H = 30
+R = 60
+HOST = "localhost"
+PORT = 1024
 
 def predator_process(shared_state, lock):
     energy = 50
-    state = PASSIVE
-
-    # Join env
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.connect(("localhost", 5000))
-    sock.close()
 
-    while energy >= 0:
+    # Connexion à l'environnement
+    while True:
+        try:
+            sock.connect((HOST, PORT))
+            break
+        except ConnectionRefusedError:
+            print("[Predator] Waiting for ENV to be ready...")
+            time.sleep(0.5)
+
+    while energy > 0:
         energy -= 1
 
-        if energy < 30:
-            state = ACTIVE
-        elif energy > 60:
-            state = PASSIVE
-
-        if state == ACTIVE:
+        # Manger si faim
+        if energy < H:
             with lock:
                 if shared_state["num_preys"] > 0:
                     shared_state["num_preys"] -= 1
-                    energy += 20
+                    energy += 50
+                    print(f"[Predator] ate a prey, energy={energy}, preys left={shared_state['num_preys']}")
 
-        time.sleep(1)
+        # Reproduire si assez d'énergie
+        elif energy > R:
+            with lock:
+                if shared_state["num_predators"] >= 2:
+                    shared_state["num_predators"] += 1
+                    energy -= 15
+                    print(f"[Predator] reproduced, total predators={shared_state['num_predators']}")
+
+        time.sleep(0.5)
 
     print("Predator died")
+    sock.close()
