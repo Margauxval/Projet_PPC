@@ -1,31 +1,44 @@
 import socket
 import time
 
-ACTIVE = "ACTIVE"
-PASSIVE = "PASSIVE"
+H = 20
+R = 50
+HOST = "localhost"
+PORT = 1024
 
 def prey_process(shared_state, lock):
     energy = 40
-    state = PASSIVE
-
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.connect(("localhost", 5000))
-    sock.close()
 
-    while energy >= 0:
+    # Connexion à l'environnement
+    while True:
+        try:
+            sock.connect((HOST, PORT))
+            break
+        except ConnectionRefusedError:
+            print("[Prey] Waiting for ENV to be ready...")
+            time.sleep(0.5)
+
+    while energy > 0:
         energy -= 1
 
-        if energy < 20:
-            state = ACTIVE
-        elif energy > 50:
-            state = PASSIVE
-
-        if state == ACTIVE:
+        # Choisir action
+        if energy < H:
             with lock:
                 if shared_state["grass"] > 0:
                     shared_state["grass"] -= 1
-                    energy += 10
+                    energy += 50
+                    print(f"[Prey] ate grass, energy={energy}, grass left={shared_state['grass']}")
 
-        time.sleep(1)
+        # Reproduire si assez d'énergie
+        elif energy > R:
+            with lock:
+                if shared_state["num_preys"] >= 2:
+                    shared_state["num_preys"] += 1
+                    energy -= 10
+                    print(f"[Prey] reproduced, total preys={shared_state['num_preys']}")
+
+        time.sleep(0.5)
 
     print("Prey died")
+    sock.close()
