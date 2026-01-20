@@ -1,10 +1,35 @@
 ```mermaid
 flowchart LR
-    Display -->|Message Queue| Env
-    Env -->|Shared Memory| Predator
-    Env -->|Shared Memory| Prey
+    subgraph Operator
+        Display
+    end
 
-    Predator -->|Socket join| Env
-    Prey -->|Socket join| Env
+    subgraph System
+        Env
+        SharedMemory[(Shared Memory)]
+        MQ[(Message Queue)]
+        Socket[(TCP Socket)]
+    end
 
-    OS -->|SIGUSR1 drought| Env
+    subgraph Individuals
+        Predator
+        Prey
+    end
+
+    Display -->|Commands / Queries| MQ
+    Env -->|Status Updates| MQ
+
+    Env <--> SharedMemory
+    Predator <--> SharedMemory
+    Prey <--> SharedMemory
+
+    Predator -->|Join Request| Socket
+    Prey -->|Join Request| Socket
+    Socket -->|Initial Params| Predator
+    Socket -->|Initial Params| Prey
+
+    OS_SIGUSR1[OS Signal] -->|SIGUSR1: drought| Env
+
+    Env -->|Fork/Spawn| Predator
+    Env -->|Fork/Spawn| Prey
+```
