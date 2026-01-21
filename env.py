@@ -57,3 +57,79 @@ def env_process(shared_state, msg_queue, lock):
         server.close()
         # Sécurité : on s'assure que le message STOP est bien envoyé
         msg_queue.put("STOP")
+
+
+
+####
+2e version de env.py
+###
+
+import socket
+import time
+
+HOST = "localhost"
+PORT = 1024
+
+def env_process(shared_state, msg_queue, lock):
+    paused = False
+
+    # --- serveur ---
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind((HOST, PORT))
+    server.listen()
+    print("[ENV] Waiting for clients...")
+
+    clients = []
+    while len(clients) < 2:
+        client, addr = server.accept()
+        clients.append(client)
+        print(f"[ENV] Client connected: {addr}")
+
+    print("[ENV] All clients connected, starting simulation")
+
+    # --- boucle principale ---
+    while True:
+
+        # 1️⃣ lire commandes display
+        while not msg_queue.empty():
+            msg = msg_queue.get()
+
+            if isinstance(msg, tuple) and msg[0] == "CMD":
+                if msg[1] == "PAUSE":
+                    paused = True
+                    print("[ENV] Paused")
+                elif msg[1] == "RESUME":
+                    paused = False
+                    print("[ENV] Resumed")
+                elif msg[1] == "DROUGHT":
+                    shared_state["drought"] = True
+                elif msg[1] == "STOP":
+                    msg_queue.put("STOP")
+                    return
+
+        # 2️⃣ pause réelle
+        if paused:
+            time.sleep(0.2)
+            continue   # ⬅️ C’EST ÇA QUI BLOQUAIT AVANT
+
+        # 3️⃣ simulation normale
+        with lock:
+            if not shared_state.get("drought", False):
+                shared_state["grass"] += 1
+
+            state = (
+                f"Grass={shared_state['grass']} | "
+                f"Preys={shared_state['num_preys']} | "
+                f"Predators={shared_state['num_predators']}"
+            )
+
+            msg_queue.put(state)
+
+            # condition d'arrêt
+            if shared_state["num_preys"] <= 0 or shared_state["num_predators"] <= 0:
+                print("[ENV] Simulation finished")
+                msg_queue.put("STOP")
+                return
+
+        time.sleep(1)
+
