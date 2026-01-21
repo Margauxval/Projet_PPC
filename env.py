@@ -1,93 +1,105 @@
 import socket
 import time
 import signal
+import os
 
-# Variable globale pour l'état de la sécheresse
-drought_active = False
-
-def handle_drought(signum, frame):
-    """Handler déclenché par le signal SIGUSR1 envoyé par le main"""
-    global drought_active
-    drought_active = not drought_active
-
-def env_process(shared_state, msg_queue, lock):
-    global drought_active
-    
-    # 1. Configuration du Signal SIGUSR1
-    signal.signal(signal.SIGUSR1, handle_drought)
-    
-    # 2. Configuration du Serveur Socket (TCP)
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # SO_REUSEADDR permet de relancer le script immédiatement sans attendre l'OS
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    
-    try:
-        server.bind(("localhost", 1024))
-    except OSError as e:
-        msg_queue.put(f"ERREUR ENV : Port 1024 occupé. ({e})")
-        return
-
-    server.listen()
-    msg_queue.put("ENV : Serveur prêt, en attente des agents (Prey/Predator)...")
-
-    clients = []
-    # On attend la connexion des deux agents (un processus prey et un predator)
-    while len(clients) < 2:
-        client, _ = server.accept()
-        clients.append(client)
-    
-    msg_queue.put("ENV : Connexions établies. Lancement de la simulation.")
-
+def env_process(shared_state, msg_queue, lock, drought_freq):
+    drought = {"active": False, "timer": 0}
     cycle_count = 0
+    start_time = time.time()
     
+    # Initialisation du statut pour éviter une erreur si le bilan est appelé tôt
+    status = "Initialisation..."
+
+    def handle_sigusr1(signum, frame):
+        drought["active"] = True
+        drought["timer"] = 6
+        msg_queue.put("ALERTE : Sécheresse !")
+
+    # Configuration du signal pour la sécheresse
+    signal.signal(signal.SIGUSR1, handle_sigusr1)
+
+    # Configuration du Socket (Consigne obligatoire)
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(("localhost", 1024))
+    server.listen(50)
+    server.setblocking(False)
+
+    last_tick = time.time()
+
     try:
         while True:
-            # --- A. Gestion des commandes venant du Display (ex: touche 'q') ---
-            while not msg_queue.empty():
-                cmd = msg_queue.get()
-                if cmd == ("CMD", "STOP"):
-                    msg_queue.put("ENV : Arrêt demandé par l'utilisateur.")
-                    return 
-
-            # --- B. Cycle automatique de Sécheresse (toutes les 10 secondes) ---
-            cycle_count += 1
-            if cycle_count >= 10:
-                drought_active = not drought_active
-                cycle_count = 0
-                msg_queue.put(f"ENV : Sécheresse {'DÉBUT' if drought_active else 'FIN'}")
-
-            # --- C. Mise à jour de la Simulation ---
-            with lock:
-                # L'herbe ne pousse que s'il n'y a pas de sécheresse
-                if not drought_active:
-                    shared_state["grass"] += 2
-                
-                # Formatage du statut pour l'affichage (Dashboard)
-                status = (f"Herbe: {shared_state['grass']} | "
-                          f"Proies: {shared_state['num_preys']} (Actives: {shared_state['num_active_preys']}) | "
-                          f"Preds: {shared_state['num_predators']}")
-                
-                if drought_active:
-                    status += " [SÉCHERESSE]"
-                
-                msg_queue.put(status)
-
-                # --- D. Condition de fin automatique ---
-                if shared_state["num_preys"] <= 0 or shared_state["num_predators"] <= 0:
-                    msg_queue.put("ENV : Une population a disparu. Fin.")
+            # --- 1. Gestion des commandes (Queue) ---
+            # On traite les messages, mais on ne traite qu'un certain nombre 
+            # pour éviter une boucle infinie si on remet un message dans la file
+            for _ in range(msg_queue.qsize()):
+                try:
+                    cmd = msg_queue.get_nowait()
+                    if cmd == ("CMD", "STOP"):
+                        return
+                    elif cmd == ("CMD", "FORCED_DROUGHT"):
+                        # Auto-envoi du signal SIGUSR1
+                        os.kill(os.getpid(), signal.SIGUSR1)
+                    else:
+                        # Si ce n'est pas une commande pour l'env, on le remet 
+                        # pour que le display puisse le lire (logs, etc.)
+                        msg_queue.put(cmd)
+                except:
                     break
-            
-            time.sleep(1) # Un cycle par seconde
+
+            # --- 2. Mise à jour de l'environnement ---
+            now = time.time()
+            # Délai augmenté à 1.0 seconde pour une simulation plus longue
+            if now - last_tick > 1.0: 
+                last_tick = now
+                cycle_count += 1
+
+                # Déclenchement automatique de la sécheresse
+                if cycle_count % drought_freq == 0 and not drought["active"]:
+                    os.kill(os.getpid(), signal.SIGUSR1)
+
+                with lock:
+                    # Gestion de l'herbe
+                    if drought["active"]:
+                        drought["timer"] -= 1
+                        if drought["timer"] <= 0:
+                            drought["active"] = False
+                    else:
+                        shared_state["grass"] += 1
+
+                    # Protection ABSOLUE contre les nombres négatifs (Clamping)
+                    shared_state["grass"] = max(0, shared_state["grass"])
+                    shared_state["num_preys"] = max(0, shared_state["num_preys"])
+                    shared_state["num_predators"] = max(0, shared_state["num_predators"])
+                    shared_state["num_active_preys"] = max(0, shared_state["num_active_preys"])
+
+                    # Construction du message de statut pour le display
+                    status = (
+                        f"Herbe: {shared_state['grass']} | "
+                        f"Proies: {shared_state['num_preys']} | "
+                        f"Prédateurs: {shared_state['num_predators']}"
+                    )
+                    if drought["active"]:
+                        status += " [SÉCHERESSE]"
+
+                    msg_queue.put(status)
+
+                    # Condition d'arrêt : on attend 20s au début pour laisser les populations s'installer
+                    if time.time() - start_time > 20:
+                        if shared_state["num_preys"] <= 0 or shared_state["num_predators"] <= 0:
+                            break
+
+            # --- 3. Acceptation des Sockets (non-bloquant) ---
+            try:
+                conn, _ = server.accept()
+                conn.close()
+            except (BlockingIOError, OSError):
+                pass
+
+            time.sleep(0.05) # Petite pause pour libérer le CPU
 
     finally:
-        # --- E. Nettoyage et Fermeture ---
-        # On prévient les agents via le socket avant de fermer
-        for c in clients:
-            try:
-                c.sendall(b"END")
-                c.close()
-            except:
-                pass
         server.close()
-        time.sleep(0.2) # Laisser le temps aux messages de partir
-        msg_queue.put("STOP") # Indique au Display de s'éteindre
+        # Envoi du bilan final au processus d'affichage
+        msg_queue.put(("BILAN", f"Simulation terminée | {status}"))
