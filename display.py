@@ -1,12 +1,45 @@
+import sys
 import time
-from multiprocessing import Queue
+import select
 
 def display_process(msg_queue):
+    print("""
+=== DISPLAY CONTROLS ===
+p : pause
+r : resume
+d : drought
+q : quit
+========================
+""")
+
     while True:
-        if not msg_queue.empty():
-            state = msg_queue.get()
-            if state == "STOP":
+        # 1️⃣ affichage états
+        while not msg_queue.empty():
+            msg = msg_queue.get()
+            if msg == "STOP":
                 print("[DISPLAY] Simulation ended")
-                break
-            print(f"[DISPLAY] {state}")
-        time.sleep(0.5)
+                return
+            print(f"[DISPLAY] {msg}")
+
+        # 2️⃣ lecture clavier NON BLOQUANTE
+        if select.select([sys.stdin], [], [], 0)[0]:
+            key = sys.stdin.read(1)
+
+            if key == "p":
+                msg_queue.put(("CMD", "PAUSE"))
+                print("[DISPLAY] pause")
+
+            elif key == "r":
+                msg_queue.put(("CMD", "RESUME"))
+                print("[DISPLAY] resume")
+
+            elif key == "d":
+                msg_queue.put(("CMD", "DROUGHT"))
+                print("[DISPLAY] drought")
+
+            elif key == "q":
+                msg_queue.put(("CMD", "STOP"))
+                print("[DISPLAY] quit")
+                return
+
+        time.sleep(0.1)
