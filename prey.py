@@ -2,68 +2,43 @@ import socket
 import time
 import errno
 
-H = 20
-R = 50
-HOST = "localhost"
-PORT = 1024
-
-def prey_process(shared_state, lock):
-    energy = 40
+def prey_process(shared_state, lock, msg_queue):
+    energy, was_active = 40, False
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-    # Connexion à l'environnement
+    
     while True:
         try:
-            sock.connect((HOST, PORT))
-            # On passe en mode non-bloquant après la connexion réussie
-            sock.setblocking(False) 
+            sock.connect(("localhost", 1024))
+            sock.setblocking(False)
             break
-        except ConnectionRefusedError:
-            print("[Prey] Waiting for ENV to be ready...")
-            time.sleep(0.5)
+        except: time.sleep(0.5)
 
-    print("[Prey] Connected and running.")
+    try:
+        while energy > 0:
+            try:
+                if sock.recv(1024) == b"END": break
+            except socket.error: pass
 
-    while energy > 0:
-        # 1. Vérifier si l'environnement a envoyé un signal d'arrêt
-        try:
-            data = sock.recv(1024)
-            if data == b"END":
-                print("[Prey] Received END signal from environment. Stopping...")
-                break
-        except socket.error as e:
-            # L'erreur EAGAIN ou EWOULDBLOCK signifie juste qu'il n'y a rien à lire
-            err = e.args[0]
-            if err != errno.EAGAIN and err != errno.EWOULDBLOCK:
-                print(f"[Prey] Socket error: {e}")
-                break
+            is_active = energy < 10
+            if is_active != was_active:
+                with lock:
+                    shared_state["num_active_preys"] += 1 if is_active else -1
+                was_active = is_active
 
-        # 2. Logique de survie
-        energy -= 1
-
-        # Choisir action
-        if energy < H:
-            with lock:
-                if shared_state["grass"] > 0:
-                    shared_state["grass"] -= 1
-                    energy += 50
-                    print(f"[Prey] ate grass, energy={energy}, grass left={shared_state['grass']}")
-
-        # Reproduire si assez d'énergie
-        elif energy > R:
-            with lock:
-                if shared_state["num_preys"] >= 2:
+            energy -= 1
+            if is_active:
+                with lock:
+                    if shared_state["grass"] > 0:
+                        shared_state["grass"] -= 1
+                        energy += 30
+            elif energy > 50:
+                with lock:
                     shared_state["num_preys"] += 1
-                    energy -= 10
-                    print(f"[Prey] reproduced, total preys={shared_state['num_preys']}")
-
-        time.sleep(0.5)
-
-    if energy <= 0:
-        print("[Prey] Died of starvation.")
-        # On décrémente le compteur si elle meurt naturellement
+                    energy -= 15
+                    msg_queue.put("Naissance proie")
+            time.sleep(0.5)
+    finally:
         with lock:
-            if shared_state["num_preys"] > 0:
-                shared_state["num_preys"] -= 1
-    
-    sock.close()
+            shared_state["num_preys"] -= 1
+            if was_active: shared_state["num_active_preys"] -= 1
+        sock.close()
