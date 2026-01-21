@@ -7,12 +7,13 @@ PORT = 1024
 
 def env_process(shared_state, msg_queue, lock):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((HOST, PORT))
     server.listen()
     print("[ENV] Waiting for clients...")
 
     clients = []
-    while len(clients) < 2:  # attendre 2 clients: prey + predator
+    while len(clients) < 2:  
         client_sock, addr = server.accept()
         clients.append(client_sock)
         print(f"[ENV] Client connected: {addr}")
@@ -28,17 +29,20 @@ def env_process(shared_state, msg_queue, lock):
                 msg_queue.put(state_str)
 
                 # Condition d'arrêt
-                if shared_state["num_preys"] == 0 or shared_state["num_predators"] == 0:
+                if shared_state["num_preys"] <= 0 or shared_state["num_predators"] <= 0:
                     print("[ENV] No preys or predators left. Ending simulation.")
                     
-                    # Prévenir les clients
+                    # 1. Prévenir les clients
                     for client in clients:
                         try:
                             client.sendall(b"END")
                         except Exception:
-                            pass  # le client peut déjà être fermé
+                            pass 
 
-                    # Stopper l'affichage et fermer le serveur
+                    # 2. TEMPS MORT : Très important pour laisser les clients recevoir b"END"
+                    time.sleep(1) 
+
+                    # 3. Stopper l'affichage et sortir
                     msg_queue.put("STOP")
                     return
 
@@ -51,5 +55,5 @@ def env_process(shared_state, msg_queue, lock):
             except Exception:
                 pass
         server.close()
+        # Sécurité : on s'assure que le message STOP est bien envoyé
         msg_queue.put("STOP")
-
