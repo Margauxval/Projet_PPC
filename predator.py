@@ -2,32 +2,39 @@ import socket
 import time
 
 def predator_process(shared_state, lock, msg_queue):
-    energy = 50
+    energy = 60
+
+    # Connexion au socket pour s'enregistrer auprès de l'environnement
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    
-    while True:
-        try:
-            sock.connect(("localhost", 1024))
-            sock.setblocking(False)
-            break
-        except: time.sleep(0.5)
+    try:
+        sock.connect(("localhost", 1024))
+        sock.close()
+    except:
+        return
 
     try:
         while energy > 0:
-            try:
-                if sock.recv(1024) == b"END": break
-            except: pass
+            energy -= 3 # Diminution régulière de l'énergie
 
-            energy -= 1
-            if energy < 30:
+            # Tentative de chasse si l'énergie est basse (seuil H = 40)
+            if energy < 40:
                 with lock:
+                    # Vérification stricte : on ne mange que s'il y a des proies ACTIVES
+                    # Cela empêche le nombre de proies de devenir négatif
                     if shared_state["num_active_preys"] > 0:
-                        # On décrémente la population totale, 
-                        # la proie gérera son compteur actif dans son finally
                         shared_state["num_preys"] -= 1
-                        energy += 50
-                        msg_queue.put("Prédation réussie !")
-            time.sleep(0.5)
+                        shared_state["num_active_preys"] -= 1
+                        energy += 70
+                        msg_queue.put("PRÉDATION !")
+            
+            # Reproduction si l'énergie est élevée (seuil R = 80)
+            if energy > 80:
+                energy -= 50
+                msg_queue.put("Naissance prédateur")
+
+            time.sleep(1)
+
     finally:
-        with lock: shared_state["num_predators"] -= 1
-        sock.close()
+        with lock:
+            shared_state["num_predators"] -= 1
+        msg_queue.put("Un prédateur est mort")
