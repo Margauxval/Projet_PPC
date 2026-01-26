@@ -1,9 +1,9 @@
 ```mermaid
 flowchart TB
     %% --- STYLE DES BLOCS ---
-    classDef mainNode fill:#f9f,stroke:#333,stroke-width:4px
-    classDef storage fill:#e1f5fe,stroke:#01579b
-    classDef agents fill:#fff3e0,stroke:#e65100
+    classDef mainNode fill:#f9f,stroke:#333,stroke-width:4px,color:black
+    classDef storage fill:#e1f5fe,stroke:#01579b,color:black
+    classDef agents fill:#fff3e0,stroke:#e65100,color:black
 
     %% --- DÉFINITION DES PROCESSUS ---
     
