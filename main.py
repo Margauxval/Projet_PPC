@@ -37,7 +37,8 @@ if __name__ == "__main__":
         "grass": g_init,
         "num_preys": p_init,          
         "num_active_preys": 0,
-        "num_predators": d_init
+        "num_predators": d_init,
+        "drought_active": False
     })
 
     p_display = Process(target=display_process, args=(shared_state, msg_queue, lock))
