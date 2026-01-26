@@ -1,50 +1,45 @@
 import socket
 import time
 
-def prey_process(shared_state, lock, msg_queue):
+def prey_process(shared_state, lock, msg_queue, spawn_queue):
     energy = 50
     was_active = False
 
-    # Connexion au socket de l'environnement pour "rejoindre" la simulation
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         sock.connect(("localhost", 1024))
         sock.close()
-    except:
-        return # Arrêt si l'environnement n'est pas disponible
+    except: return 
 
+    # Dans prey_process
+   # Dans prey_process
     try:
         while energy > 0:
-            # État déterminé par l'énergie : active si énergie < 35 (H)
-            is_active = energy < 35
-            
-            # Mise à jour du compteur d'individus actifs dans la mémoire partagée
+            # La proie devient active si son énergie tombe sous 80 (très vite)
+            is_active = energy < 50 
             if is_active != was_active:
                 with lock:
-                    shared_state["num_active_preys"] += 1 if is_active else -1
+                    if is_active: shared_state["num_active_preys"] += 1
+                    else: shared_state["num_active_preys"] = max(0, shared_state["num_active_preys"] - 1)
                 was_active = is_active
 
-            energy -= 20 # Diminution régulière de l'énergie
+            energy -= 8 # Consommation plus rapide pour forcer l'activité
 
             if is_active:
                 with lock:
-                    # Vérification stricte pour éviter que l'herbe devienne négative
                     if shared_state["grass"] > 0:
                         shared_state["grass"] -= 1
-                        energy += 40
+                        energy += 30 # Gain modéré pour rester souvent en recherche
                         msg_queue.put("Une proie a mangé")
             
-            # Reproduction si l'énergie dépasse le seuil R (80)
-            elif energy > 70:
-                energy -= 45
+            elif energy > 60: # Seuil de reproduction plus difficile à atteindre
+                energy -= 30
                 msg_queue.put("Naissance proie")
+                spawn_queue.put("PROIE")
 
-            time.sleep(1)
-
+            time.sleep(1.0)
     finally:
-        # Nettoyage lors de la mort de la proie
         with lock:
-            shared_state["num_preys"] -= 1
-            if was_active:
-                shared_state["num_active_preys"] -= 1
-        msg_queue.put("Une proie est morte")
+            shared_state["num_preys"] = max(0, shared_state["num_preys"] - 1)
+            if was_active: shared_state["num_active_preys"] = max(0, shared_state["num_active_preys"] - 1)
+        msg_queue.put("Une proie est morte de faim")
