@@ -4,8 +4,8 @@ stateDiagram-v2
 
     %% --- STYLE GÉNÉRAL ---
     classDef initial fill:#f5f5f5,stroke:#333,color:black
-    classDef vivant fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:black
-    classDef action fill:#fff9c4,stroke:#fbc02d,stroke-width:2px,color:black
+    classDef vivant fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:white
+    classDef action fill:#fff9c4,stroke:#fbc02d,stroke-width:2px,color:white
     classDef mort fill:#ffebee,stroke:#c62828,stroke-width:3px,color:black
 
     [*] --> INITIALISATION
