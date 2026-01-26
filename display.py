@@ -2,98 +2,105 @@ import pygame
 import time
 from pygame.locals import *
 
-def show_bilan(screen, font_l, font_s, texte_bilan):
-    """Affiche l'écran final de statistiques."""
+def draw_graph(screen, history):
+    if not history: return
+    margin, width, height, base_y = 60, 680, 180, 540
+    max_val = max([max(h[0], h[1], h[2]//10, 1) for h in history])
+    for i in range(len(history) - 1):
+        x1 = margin + (i * width // len(history))
+        x2 = margin + ((i + 1) * width // len(history))
+        data = [(history[i][0], history[i+1][0], (255, 255, 255)), 
+                (history[i][1], history[i+1][1], (255, 100, 100)), 
+                (history[i][2]//10, history[i+1][2]//10, (100, 255, 100))]
+        for v1, v2, color in data:
+            y1 = base_y - (v1 * height // max_val)
+            y2 = base_y - (v2 * height // max_val)
+            pygame.draw.line(screen, color, (x1, y1), (x2, y2), 2)
+
+def show_bilan(screen, font_l, font_s, texte_bilan, history):
     running = True
     while running:
-        screen.fill((20, 50, 20))
-        screen.blit(font_l.render("=== BILAN FINAL ===", True, (255, 255, 255)), (250, 150))
-        
-        parts = texte_bilan.split(" | ")
-        for i, part in enumerate(parts):
-            screen.blit(font_s.render(part, True, (200, 255, 200)), (150, 250 + i * 40))
-
-        screen.blit(font_s.render("Appuyez sur une touche pour quitter", True, (150, 150, 150)), (250, 500))
+        screen.fill((20, 30, 20))
+        screen.blit(font_l.render("BILAN ANALYTIQUE FINAL", True, (255, 255, 255)), (200, 30))
+        y_offset = 80
+        for line in texte_bilan.split(" | "):
+            screen.blit(font_s.render(line, True, (200, 255, 200)), (60, y_offset))
+            y_offset += 25
+        draw_graph(screen, history)
+        screen.blit(font_s.render("Graphique : Blanc=Proies, Rouge=Preds, Vert=Herbe/10", True, (150, 150, 150)), (60, 340))
+        screen.blit(font_l.render("Appuyez sur n'importe quelle touche pour quitter", True, (255, 255, 0)), (100, 560))
         pygame.display.flip()
-
         for event in pygame.event.get():
-            if event.type in (QUIT, KEYDOWN):
-                running = False
+            if event.type in (QUIT, KEYDOWN): running = False
 
-def display_process(msg_queue):
-    """Processus d'affichage utilisant uniquement la Message Queue."""
+def display_process(shared_state, msg_queue, lock):
     pygame.init()
     screen = pygame.display.set_mode((800, 600))
-    pygame.display.set_caption("Circle of Life - EcoSim")
-
-    font_large = pygame.font.Font(None, 36)
-    font_small = pygame.font.Font(None, 24)
+    pygame.display.set_caption("EcoSim - Dashboard Expert")
+    font_l, font_m, font_s = pygame.font.Font(None, 38), pygame.font.Font(None, 28), pygame.font.Font(None, 22)
     clock = pygame.time.Clock()
 
-    logs = []
-    last_status = "Initialisation..."
+    history = []
+    stats = {"naiss_p": 0, "naiss_d": 0, "morts_p": 0, "morts_d": 0}
+    last_hist = time.time()
 
     while True:
-        # 1. Gestion des entrées utilisateur
         for event in pygame.event.get():
-            if event.type == QUIT:
-                msg_queue.put(("CMD", "STOP"))
-                return
+            if event.type == QUIT: msg_queue.put(("CMD", "STOP"))
             if event.type == KEYDOWN:
-                if event.key == K_q:
-                    msg_queue.put(("CMD", "STOP"))
-                elif event.key == K_d:
-                    msg_queue.put(("CMD", "FORCED_DROUGHT"))
+                if event.key == K_q: msg_queue.put(("CMD", "STOP"))
+                if event.key == K_d: msg_queue.put(("CMD", "FORCED_DROUGHT"))
 
-        # 2. Lecture d'UN SEUL message à la fois pour éviter l'effet "bloc"
-        # On utilise get_nowait() pour ne pas bloquer le rendu graphique
-        try:
-            msg = msg_queue.get_nowait()
+        while not msg_queue.empty():
+            try:
+                msg = msg_queue.get_nowait()
+                if isinstance(msg, tuple) and msg[0] == "BILAN":
+                    show_bilan(screen, font_l, font_s, msg[1], history); return
+                if "Naissance proie" in msg: stats["naiss_p"] += 1
+                elif "Naissance prédateur" in msg: stats["naiss_d"] += 1
+                elif "morte" in msg or "PRÉDATION" in msg: stats["morts_p"] += 1
+                elif "mort" in msg: stats["morts_d"] += 1
+            except: break
 
-            if msg == "STOP": 
-                return
-            
-            if isinstance(msg, tuple) and msg[0] == "BILAN":
-                show_bilan(screen, font_large, font_small, msg[1])
-                return
+        if time.time() - last_hist > 0.5:
+            with lock: history.append((shared_state["num_preys"], shared_state["num_predators"], shared_state["grass"]))
+            last_hist = time.time()
 
-            if isinstance(msg, str):
-                if "|" in msg: 
-                    # Mise à jour instantanée du bandeau de statut (Herbe/Proies/Pred)
-                    last_status = msg
-                else: 
-                    # Ajout d'une action dans les logs (Naissance/Mort/Manger)
-                    logs.append(msg)
-                    if len(logs) > 16: 
-                        logs.pop(0)
-                    
-                    # --- RALENTISSEMENT ---
-                    # On attend un peu après avoir reçu une action pour qu'elle soit lisible
-                    time.sleep(0.15) 
-        except:
-            # Pas de message dans la queue, on continue le rendu
-            pass
+        screen.fill((10, 10, 15))
+        with lock:
+            cp, cd, cg = shared_state["num_preys"], shared_state["num_predators"], shared_state["grass"]
+            ca_p = shared_state["num_active_preys"]
+            # Si vous n'avez pas encore num_active_preds dans shared_state, on l'estime pour l'affichage
+            ca_d = shared_state.get("num_active_predators", cd // 2) 
+            drought_on = shared_state.get("drought_active", False)
+        
+        # --- BLOC 1 : POPULATIONS ET ALERTE ---
+        bg_pop = (70, 20, 20) if drought_on else (30, 30, 50)
+        pygame.draw.rect(screen, bg_pop, (30, 20, 740, 90), border_radius=8)
+        txt_title = "!!! SÉCHERESSE EN COURS !!!" if drought_on else "1. POPULATIONS ACTUELLES"
+        screen.blit(font_l.render(txt_title, True, (255, 255, 255)), (50, 30))
+        screen.blit(font_m.render(f"Herbe: {cg}  |  Proies: {cp}  |  Prédateurs: {cd}", True, (200, 200, 255)), (70, 65))
 
-        # 3. Rendu Graphique
-        screen.fill((30, 30, 30))
+        # --- BLOC 2 : DYNAMIQUE (SÉPARÉ) ---
+        pygame.draw.rect(screen, (40, 40, 40), (30, 120, 740, 200), border_radius=8)
+        screen.blit(font_l.render("2. DYNAMIQUE DES INDIVIDUS", True, (255, 255, 255)), (50, 130))
+        
+        # Section Proies
+        screen.blit(font_m.render("PROIES", True, (255, 255, 255)), (70, 165))
+        screen.blit(font_s.render(f"- En recherche de nourriture : {ca_p}", True, (150, 255, 150)), (90, 190))
+        screen.blit(font_s.render(f"- En repos / reproduction   : {max(0, cp - ca_p)}", True, (200, 255, 200)), (90, 215))
+        
+        # Section Prédateurs (BIEN SÉPARÉ)
+        screen.blit(font_m.render("PRÉDATEURS", True, (255, 255, 255)), (420, 165))
+        screen.blit(font_s.render(f"- En chasse active         : {ca_d}", True, (255, 150, 150)), (440, 190))
+        screen.blit(font_s.render(f"- En phase reproduction    : {max(0, cd - ca_d)}", True, (255, 200, 200)), (440, 215))
 
-        # Bandeau de Statut (Haut)
-        pygame.draw.rect(screen, (50, 50, 80), (20, 20, 760, 60))
-        screen.blit(font_large.render(last_status, True, (255, 255, 0)), (40, 38))
+        # --- BLOC 3 : STATS ---
+        pygame.draw.rect(screen, (20, 20, 30), (30, 330, 740, 180), border_radius=8)
+        screen.blit(font_l.render("3. COMPTEURS VITAUX (TOTAL)", True, (255, 255, 255)), (50, 340))
+        screen.blit(font_m.render(f"Naissances : Proies [{stats['naiss_p']}] | Préd. [{stats['naiss_d']}]", True, (200, 255, 200)), (70, 385))
+        screen.blit(font_m.render(f"Décès : Proies [{stats['morts_p']}] | Préd. [{stats['morts_d']}]", True, (255, 150, 150)), (70, 430))
 
-        # Zone des Logs (Milieu)
-        for i, log in enumerate(logs):
-            color = (200, 200, 200) # Gris par défaut
-            if "mangé" in log or "Naissance" in log: 
-                color = (100, 255, 100) # Vert
-            if "PRÉDATION" in log or "mort" in log: 
-                color = (255, 100, 100) # Rouge
-            screen.blit(font_small.render(f"> {log}", True, color), (50, 110 + i * 25))
-
-        # Bandeau d'Instructions (Bas)
-        pygame.draw.rect(screen, (20, 20, 20), (0, 560, 800, 40))
-        instructions = font_small.render("[D] Forcer Sécheresse | [Q] Quitter", True, (255, 255, 255))
-        screen.blit(instructions, (50, 572))
-
+        screen.blit(font_s.render("[D] Forcer Sécheresse | [Q] Quitter", True, (150, 150, 150)), (280, 560))
         pygame.display.flip()
         clock.tick(30)
