@@ -10,7 +10,7 @@ def env_process(shared_state, msg_queue, lock, drought_freq):
     def handle_sigusr1(s, f):
         nonlocal drought_timer, cycle_count
         with lock: shared_state["drought_active"] = True
-        drought_timer = 8 
+        drought_timer = drought_freq
         cycle_count = 0 # Réinitialise pour le prochain cycle
         msg_queue.put("DÉBUT SÉCHERESSE")
 
