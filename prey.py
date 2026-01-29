@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import socket
 import time
 
@@ -11,11 +13,8 @@ def prey_process(shared_state, lock, msg_queue, spawn_queue):
         sock.close()
     except: return 
 
-    # Dans prey_process
-   # Dans prey_process
     try:
         while energy > 0:
-            # La proie devient active si son énergie tombe sous 80 (très vite)
             is_active = energy < 50 
             if is_active != was_active:
                 with lock:
@@ -23,16 +22,16 @@ def prey_process(shared_state, lock, msg_queue, spawn_queue):
                     else: shared_state["num_active_preys"] = max(0, shared_state["num_active_preys"] - 1)
                 was_active = is_active
 
-            energy -= 8 # Consommation plus rapide pour forcer l'activité
+            energy -= 8 
 
             if is_active:
                 with lock:
                     if shared_state["grass"] > 0:
                         shared_state["grass"] -= 1
-                        energy += 30 # Gain modéré pour rester souvent en recherche
+                        energy += 30 
                         msg_queue.put("Une proie a mangé")
             
-            elif energy > 60: # Seuil de reproduction plus difficile à atteindre
+            elif energy > 60: 
                 energy -= 30
                 msg_queue.put("Naissance proie")
                 spawn_queue.put("PROIE")
